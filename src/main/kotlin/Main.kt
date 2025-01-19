@@ -1,15 +1,15 @@
-@file:OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.Button
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.OutlinedTextField
-import androidx.compose.material.Text
+import androidx.compose.foundation.window.WindowDraggableArea
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.SystemTheme
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferAction
@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.application
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.text.PDFTextStripper
@@ -25,24 +26,87 @@ import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
 import java.io.File
 
+private val themeDetector = SystemThemeDetector()
+
 /**
  * Entry point of the application.
  */
 fun main() = application {
     Window(onCloseRequest = ::exitApplication, title = "PDF Extractor") {
-        MaterialTheme {
-            PDFDropperScreen()
+        val systemTheme by themeDetector.current.collectAsState()
+
+        SideEffect {
+            // https://www.formdev.com/flatlaf/macos/
+            window.rootPane.putClientProperty("apple.awt.application.appearance", "system")
+            window.rootPane.putClientProperty("apple.awt.fullscreenable", true)
+            window.rootPane.putClientProperty("apple.awt.windowTitleVisible", false)
+            window.rootPane.putClientProperty("apple.awt.fullWindowContent", true)
+            window.rootPane.putClientProperty("apple.awt.transparentTitleBar", true)
+        }
+
+        PDFExtractorApp(systemTheme)
+    }
+}
+
+/**
+ * High-level composable that decides on color scheme based on system theme
+ * and sets up our Material 3 theme and layout.
+ */
+@Composable
+fun WindowScope.PDFExtractorApp(systemTheme: SystemTheme) {
+    PDFExtractorTheme(systemTheme = systemTheme) {
+        // Scaffold provides a standard Material 3 layout with a top bar.
+        Scaffold(
+            topBar = {
+                WindowDraggableArea {
+                    CenterAlignedTopAppBar(
+                        title = { Text("PDF Extractor") },
+                    )
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.background
+        ) { innerPadding ->
+            // Main box that also adds a background gradient
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            ) {
+                PDFDropperScreen()
+            }
         }
     }
 }
 
 /**
- * High-level composable that sets up and displays our PDF-dropper UI.
+ * Custom theme that decides dark/light color schemes based on the system theme.
+ */
+@Composable
+fun PDFExtractorTheme(systemTheme: SystemTheme, content: @Composable () -> Unit) {
+    // Feel free to customize these color schemes
+    val darkColors = darkColorScheme(
+    )
+    val lightColors = lightColorScheme(
+    )
+
+    val colorScheme = if (systemTheme == SystemTheme.Dark) darkColors else lightColors
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography(),
+        content = content
+    )
+}
+
+/**
+ * Top-level screen composable that sets up drag-and-drop handling
+ * and renders the PDF dropper UI.
  */
 @Composable
 fun PDFDropperScreen() {
     val pdfDropperState = rememberPDFDropperState()
-    PDFDropperUI(pdfDropperState)
+    PDFDropperContent(pdfDropperState)
 }
 
 /**
@@ -82,7 +146,7 @@ class PDFDropperState {
     fun extractAndCopy(clipboardSetter: (String) -> Unit) {
         val file = pdfFile ?: return
 
-        // Validate page range.
+        // Validate page range
         val actualStart = startPage.coerceIn(1, totalPages)
         val actualEnd = endPage.coerceIn(1, totalPages)
 
@@ -94,7 +158,7 @@ class PDFDropperState {
         // Extract text from the PDF in the selected range.
         val extractedText = extractTextFromPDF(file, actualStart, actualEnd)
 
-        // Copy the result to clipboard.
+        // Copy the result to clipboard
         clipboardSetter(extractedText)
 
         statusMessage = "Copied pages $actualStart to $actualEnd!"
@@ -110,11 +174,12 @@ fun rememberPDFDropperState(): PDFDropperState {
 }
 
 /**
- * The main UI for dropping a PDF file, selecting the page range,
+ * Main content for dropping a PDF file, selecting a page range,
  * and copying the text to the clipboard.
  */
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 @Composable
-fun PDFDropperUI(state: PDFDropperState) {
+fun PDFDropperContent(state: PDFDropperState) {
     val clipboard = LocalClipboardManager.current
 
     Box(
@@ -144,13 +209,24 @@ fun PDFDropperUI(state: PDFDropperState) {
                 }
             )
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Text("PDF File: ${state.pdfFile?.name ?: "<Drop a PDF here>"}")
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "PDF File: ${state.pdfFile?.name ?: "<Drop a PDF here>"}",
+                style = MaterialTheme.typography.titleMedium
+            )
             Spacer(modifier = Modifier.height(8.dp))
 
             if (state.pdfFile != null && state.totalPages > 0) {
-                Text("Total Pages: ${state.totalPages}")
-                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Total Pages: ${state.totalPages}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Page range inputs
                 Row {
@@ -160,9 +236,11 @@ fun PDFDropperUI(state: PDFDropperState) {
                             state.startPage = it.toIntOrNull() ?: 1
                         },
                         label = { Text("Start Page") },
-                        modifier = Modifier.width(120.dp)
+                        modifier = Modifier
+                            .width(120.dp)
+                            .padding(end = 16.dp)
                     )
-                    Spacer(modifier = Modifier.width(16.dp))
+
                     OutlinedTextField(
                         value = state.endPage.toString(),
                         onValueChange = {
@@ -173,21 +251,31 @@ fun PDFDropperUI(state: PDFDropperState) {
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
                     onClick = {
                         state.extractAndCopy { text ->
-                            // Provide a way to set the clipboard text
                             clipboard.setText(AnnotatedString(text))
                         }
-                    }
+                    },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Extract & Copy Pages")
                 }
 
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = state.statusMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            } else {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(state.statusMessage)
+                Text(
+                    text = "Drag and drop a PDF file anywhere in this window.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         }
     }
