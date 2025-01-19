@@ -11,8 +11,8 @@ version = "1.0-SNAPSHOT"
 
 kotlin {
     jvmToolchain {
-        this.languageVersion.value(JavaLanguageVersion.of(21))
-        vendor.value(JvmVendorSpec.JETBRAINS)
+        this.languageVersion.value(JavaLanguageVersion.of(22))
+        vendor.value(JvmVendorSpec.GRAAL_VM)
     }
 }
 
@@ -51,6 +51,7 @@ compose.desktop {
 
         buildTypes.release {
             proguard {
+                version = "7.6.1"
                 obfuscate = false
                 configurationFiles.from(file("proguard-rules.pro"))
             }
