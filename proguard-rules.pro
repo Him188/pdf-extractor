@@ -1,0 +1,3 @@
+-dontnote **
+-dontwarn **
+-keep class org.apache.** { *; }
