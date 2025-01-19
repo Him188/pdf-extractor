@@ -25,6 +25,9 @@ import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
 import java.io.File
 
+/**
+ * Entry point of the application.
+ */
 fun main() = application {
     Window(onCloseRequest = ::exitApplication, title = "PDF Extractor") {
         MaterialTheme {
@@ -33,137 +36,171 @@ fun main() = application {
     }
 }
 
+/**
+ * High-level composable that sets up and displays our PDF-dropper UI.
+ */
 @Composable
 fun PDFDropperScreen() {
-    // The dropped PDF file
-    var lastFile by remember { mutableStateOf<File?>(null) }
+    val pdfDropperState = rememberPDFDropperState()
+    PDFDropperUI(pdfDropperState)
+}
 
-    // Total pages in the PDF
-    var totalPages by remember { mutableStateOf(0) }
+/**
+ * Holds the state needed by the PDF dropper screen.
+ */
+class PDFDropperState {
+    var pdfFile: File? by mutableStateOf(null)
+    var totalPages: Int by mutableStateOf(0)
 
-    // User-selected page range
-    var startPage by remember { mutableStateOf(1) }
-    var endPage by remember { mutableStateOf(1) }
+    // Page selectors
+    var startPage: Int by mutableStateOf(1)
+    var endPage: Int by mutableStateOf(1)
 
-    // We only show the "Copied!" message after a successful extraction
-    var copyStatus by remember { mutableStateOf("") }
+    // User feedback
+    var statusMessage: String by mutableStateOf("")
 
+    /**
+     * Handles a file drop event.
+     */
+    fun onFileDropped(file: File) {
+        pdfFile = file
+        statusMessage = ""
+
+        // Open the PDF just to get the total number of pages.
+        PDDocument.load(file).use { doc ->
+            totalPages = doc.numberOfPages
+        }
+
+        // Reset default page range to the entire document.
+        startPage = 1
+        endPage = totalPages
+    }
+
+    /**
+     * Extracts and copies the text from the selected page range.
+     */
+    fun extractAndCopy(clipboardSetter: (String) -> Unit) {
+        val file = pdfFile ?: return
+
+        // Validate page range.
+        val actualStart = startPage.coerceIn(1, totalPages)
+        val actualEnd = endPage.coerceIn(1, totalPages)
+
+        if (actualStart > actualEnd) {
+            statusMessage = "Invalid page range."
+            return
+        }
+
+        // Extract text from the PDF in the selected range.
+        val extractedText = extractTextFromPDF(file, actualStart, actualEnd)
+
+        // Copy the result to clipboard.
+        clipboardSetter(extractedText)
+
+        statusMessage = "Copied pages $actualStart to $actualEnd!"
+    }
+}
+
+/**
+ * Creates and remembers a [PDFDropperState].
+ */
+@Composable
+fun rememberPDFDropperState(): PDFDropperState {
+    return remember { PDFDropperState() }
+}
+
+/**
+ * The main UI for dropping a PDF file, selecting the page range,
+ * and copying the text to the clipboard.
+ */
+@Composable
+fun PDFDropperUI(state: PDFDropperState) {
     val clipboard = LocalClipboardManager.current
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // Our drag-and-drop target
             .dragAndDropTarget(
-                shouldStartDragAndDrop = { true }, // accept any file drop, you can refine this
+                shouldStartDragAndDrop = { true },
                 target = object : DragAndDropTarget {
                     override fun onDrop(event: DragAndDropEvent): Boolean {
-                        when (event.action) {
+                        return when (event.action) {
                             DragAndDropTransferAction.Link,
                             DragAndDropTransferAction.Move,
                                 -> {
-                                val awtTransferable: Transferable = event.awtTransferable
-
-                                // Get the list of dropped files
+                                val transferable: Transferable = event.awtTransferable
                                 val fileList =
-                                    awtTransferable.getTransferData(DataFlavor.javaFileListFlavor)
-                                            as? List<File>
+                                    transferable.getTransferData(DataFlavor.javaFileListFlavor)
+                                            as? List<*>
+                                val file = fileList?.firstOrNull() as? File ?: return false
 
-                                val file = fileList?.firstOrNull() ?: return false
-
-                                // Update state with new PDF file
-                                lastFile = file
-                                copyStatus = ""
-
-                                // Open PDF just to get total pages
-                                PDDocument.load(file).use { doc ->
-                                    totalPages = doc.numberOfPages
-                                }
-
-                                // Reset default page range to full doc
-                                startPage = 1
-                                endPage = totalPages
-
-                                return true
+                                state.onFileDropped(file)
+                                true
                             }
 
-                            else -> {}
+                            else -> false
                         }
-                        return false
                     }
                 }
             )
     ) {
-        // Main UI for showing file info, page range, etc.
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Text("PDF File: ${lastFile?.name ?: "<Drop a PDF here>"}")
+            Text("PDF File: ${state.pdfFile?.name ?: "<Drop a PDF here>"}")
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (lastFile != null && totalPages > 0) {
-                Text("Total Pages: $totalPages")
+            if (state.pdfFile != null && state.totalPages > 0) {
+                Text("Total Pages: ${state.totalPages}")
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Let the user pick a start and end page
+                // Page range inputs
                 Row {
                     OutlinedTextField(
-                        value = startPage.toString(),
+                        value = state.startPage.toString(),
                         onValueChange = {
-                            startPage = it.toIntOrNull() ?: 1
+                            state.startPage = it.toIntOrNull() ?: 1
                         },
                         label = { Text("Start Page") },
                         modifier = Modifier.width(120.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     OutlinedTextField(
-                        value = endPage.toString(),
+                        value = state.endPage.toString(),
                         onValueChange = {
-                            endPage = it.toIntOrNull() ?: 1
+                            state.endPage = it.toIntOrNull() ?: 1
                         },
                         label = { Text("End Page") },
                         modifier = Modifier.width(120.dp)
                     )
                 }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Button to extract/copy the selected page range
                 Button(
                     onClick = {
-                        // Validate page range
-                        val actualStart = startPage.coerceAtLeast(1).coerceAtMost(totalPages)
-                        val actualEnd = endPage.coerceAtLeast(1).coerceAtMost(totalPages)
-                        if (actualStart > actualEnd) {
-                            copyStatus = "Invalid page range."
-                            return@Button
+                        state.extractAndCopy { text ->
+                            // Provide a way to set the clipboard text
+                            clipboard.setText(AnnotatedString(text))
                         }
-
-                        // Extract text from the selected pages
-                        val file = lastFile!!
-                        val extractedText = extractTextFromPDF(file, actualStart, actualEnd)
-
-                        // Copy to clipboard
-                        clipboard.setText(AnnotatedString(extractedText))
-
-                        copyStatus = "Copied pages $actualStart to $actualEnd!"
                     }
                 ) {
                     Text("Extract & Copy Pages")
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(copyStatus)
+                Text(state.statusMessage)
             }
         }
     }
 }
 
 /**
- * Extracts text from the given PDF file using Apache PDFBox, for the given page range.
+ * Extracts text from the given PDF file using Apache PDFBox for the specified page range.
  */
-fun extractTextFromPDF(file: File, start: Int, end: Int): String {
+fun extractTextFromPDF(file: File, startPage: Int, endPage: Int): String {
     return PDDocument.load(file).use { document ->
         val stripper = PDFTextStripper().apply {
-            startPage = start
-            endPage = end
+            this.startPage = startPage
+            this.endPage = endPage
         }
         stripper.getText(document)
     }
